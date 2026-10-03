@@ -1,0 +1,8 @@
+{
+  "name": "PathForge AI",
+  "description": "Predictive Skill Resilience & Transition Engine. Predict. Adapt. Transition.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
