@@ -20,27 +20,53 @@ It evaluates 1,800 synthetic candidate-to-target-role transitions across 20 tech
 
 ---
 
-## Dataset Schema
+## Column Categorization & Feature Breakdown
 
-| Column | Type | Description |
-|---|---|---|
-| `candidate_id` | string | Unique synthetic candidate instance ID |
-| `archetype_id` | string | Base persona identifier (30 total) used for non-leaking grouped train/test splitting |
-| `target_role` | string | The target tech occupation among the 20 PathForge target roles |
-| `skill_match_score` | float [0.0 - 1.0] | Direct competency overlap ratio |
-| `market_demand_score` | float [0.0 - 1.0] | Normalized labor demand index for candidate's skills |
-| `ai_exposure_score` | float [0.0 - 1.0] | Empirical automation vulnerability index |
-| `transferability_score` | float [0.0 - 1.0] | Cross-domain portability index |
-| `skill_breadth_score` | float [0.0 - 1.0] | Breadth ratio across tech disciplines |
-| `emerging_skill_alignment` | float [0.0 - 1.0] | Presence of modern frontier technologies |
-| `skill_gap_score` | float [0.0 - 1.0] | Ratio of missing critical core competencies |
-| `experience_years` | float [0.0 - 30.0] | Candidate's years of professional experience |
-| `target_role_experience_requirement` | float [1.0 - 8.0] | Baseline years expected for target role level |
-| `experience_gap` | float [-8.0 - 25.0] | `experience_years - target_role_experience_requirement` |
-| `number_of_matching_skills` | int [0 - 30] | Count of already possessed skills matching target role |
-| `number_of_missing_skills` | int [0 - 25] | Count of missing skills required for target role |
-| `transition_effort_score` | float [0.0 - 1.0] | Normalized upskilling effort based on weeks required |
-| `readiness_label` | categorical | Target class: `high`, `moderate`, `low` |
+The dataset contains **17 total columns**, rigorously partitioned as follows:
+- **Identifiers (2 columns)**: Not fed to the Random Forest model during inference.
+  - `candidate_id`: Unique row instance identifier.
+  - `archetype_id`: Grouping key used strictly by `GroupShuffleSplit` to prevent cross-split leakage.
+- **Target Label (1 column)**:
+  - `readiness_label`: Categorical proxy ground truth (`high`, `moderate`, `low`).
+- **Model Input Features (14 features)**:
+  1. `skill_match_score`: Direct competency overlap ratio [0.0 - 1.0]
+  2. `market_demand_score`: Normalized labor demand index for candidate's skills [0.0 - 1.0]
+  3. `ai_exposure_score`: Empirical automation vulnerability index [0.0 - 1.0]
+  4. `transferability_score`: Cross-domain portability index [0.0 - 1.0]
+  5. `skill_breadth_score`: Breadth ratio across tech disciplines [0.0 - 1.0]
+  6. `emerging_skill_alignment`: Presence of modern frontier technologies [0.0 - 1.0]
+  7. `skill_gap_score`: Ratio of missing critical core competencies [0.0 - 1.0]
+  8. `experience_years`: Candidate's years of professional experience [0.0 - 30.0]
+  9. `target_role_experience_requirement`: Baseline years expected for target role level [1.0 - 8.0]
+  10. `experience_gap`: Candidate experience minus role requirement [-8.0 - 25.0]
+  11. `number_of_matching_skills`: Count of already possessed skills matching target role [0 - 30]
+  12. `number_of_missing_skills`: Count of missing skills required for target role [0 - 25]
+  13. `transition_effort_score`: Normalized upskilling effort based on study weeks required [0.0 - 1.0]
+  14. `target_role_encoded`: Categorical encoding (0 to 19) mapping the candidate's chosen target occupation among PathForge's 20 defined roles.
+
+---
+
+## Dataset Schema Table
+
+| Column | Category | Type | Description |
+|---|---|---|---|
+| `candidate_id` | Identifier | string | Unique synthetic candidate instance ID |
+| `archetype_id` | Identifier | string | Base persona identifier (30 total) used for non-leaking grouped train/test splitting |
+| `target_role` | Model Feature (Encoded) | string | The target tech occupation among the 20 PathForge target roles (encoded as `target_role_encoded` in model) |
+| `skill_match_score` | Model Feature | float [0.0 - 1.0] | Direct competency overlap ratio |
+| `market_demand_score` | Model Feature | float [0.0 - 1.0] | Normalized labor demand index for candidate's skills |
+| `ai_exposure_score` | Model Feature | float [0.0 - 1.0] | Empirical automation vulnerability index |
+| `transferability_score` | Model Feature | float [0.0 - 1.0] | Cross-domain portability index |
+| `skill_breadth_score` | Model Feature | float [0.0 - 1.0] | Breadth ratio across tech disciplines |
+| `emerging_skill_alignment` | Model Feature | float [0.0 - 1.0] | Presence of modern frontier technologies |
+| `skill_gap_score` | Model Feature | float [0.0 - 1.0] | Ratio of missing critical core competencies |
+| `experience_years` | Model Feature | float [0.0 - 30.0] | Candidate's years of professional experience |
+| `target_role_experience_requirement` | Model Feature | float [1.0 - 8.0] | Baseline years expected for target role level |
+| `experience_gap` | Model Feature | float [-8.0 - 25.0] | `experience_years - target_role_experience_requirement` |
+| `number_of_matching_skills` | Model Feature | int [0 - 30] | Count of already possessed skills matching target role |
+| `number_of_missing_skills` | Model Feature | int [0 - 25] | Count of missing skills required for target role |
+| `transition_effort_score` | Model Feature | float [0.0 - 1.0] | Normalized upskilling effort based on weeks required |
+| `readiness_label` | Target Label | categorical | Ground truth proxy class: `high`, `moderate`, `low` |
 
 ---
 

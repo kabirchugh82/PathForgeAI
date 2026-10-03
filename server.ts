@@ -845,11 +845,44 @@ app.get('/api/market/jobs', async (req, res) => {
   }
 });
 
+let mlProcessRef: any = null;
+
+async function ensureMLServiceRunning(): Promise<boolean> {
+  const health = await MLClientService.checkHealth();
+  if (health.operational) return true;
+
+  if (mlProcessRef && !mlProcessRef.killed) {
+    return false;
+  }
+
+  console.log('[PathForge] ML service not detected on port 5001. Spawning Python FastAPI service...');
+  try {
+    mlProcessRef = spawn('python3', ['-m', 'uvicorn', 'ml.service:app', '--host', '127.0.0.1', '--port', '5001'], {
+      stdio: 'inherit',
+      detached: false
+    });
+    mlProcessRef.on('error', (err: any) => {
+      console.warn('[PathForge] Failed to spawn Python ML service:', err.message);
+    });
+    // Give it 1.5 seconds to bind
+    await new Promise(r => setTimeout(r, 1500));
+    const recheck = await MLClientService.checkHealth();
+    return recheck.operational;
+  } catch (e: any) {
+    console.warn('[PathForge] Python ML spawn notice:', e.message);
+    return false;
+  }
+}
+
 // ----------------------------------------------------
 // 5. Machine Learning Inference Proxy & Telemetry
 // ----------------------------------------------------
 app.get('/api/ml/status', async (req, res) => {
-  const health = await MLClientService.checkHealth();
+  let health = await MLClientService.checkHealth();
+  if (!health.operational) {
+    await ensureMLServiceRunning();
+    health = await MLClientService.checkHealth();
+  }
   res.json({
     success: true,
     ...health
@@ -954,6 +987,27 @@ app.get('/api/audit', async (req, res) => {
     warnings,
     uptimeSeconds: Math.round((Date.now() - new Date(auditMetrics.startedAt).getTime()) / 1000)
   });
+});
+
+// Explicit JSON 404 for any unmatched /api/* requests (prevents falling through to Vite index.html)
+app.all('/api/*', (req, res) => {
+  res.status(404).json({
+    error: true,
+    message: `API route not found: ${req.method} ${req.path}`
+  });
+});
+
+// Explicit JSON error handler for all /api/* requests (handles multer errors, payload limits, uncaught route errors)
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (req.path.startsWith('/api/')) {
+    console.error('[API Error Caught]:', err.message || err);
+    return res.status(err.status || 500).json({
+      error: true,
+      code: err.code || 'API_PROCESSING_ERROR',
+      message: err.message || 'An unexpected error occurred processing your API request.'
+    });
+  }
+  next(err);
 });
 
 // ----------------------------------------------------

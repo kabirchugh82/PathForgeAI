@@ -85,13 +85,21 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({
         body: formData
       });
 
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => ({ message: 'Extraction failed' }));
-        const technicalMsg = errJson.message || `AI Extraction failed with status ${response.status}`;
+      const rawText = await response.text();
+      let data: any = null;
+
+      try {
+        data = JSON.parse(rawText);
+      } catch (jsonErr) {
+        console.warn('[Server returned non-JSON body]:', rawText.slice(0, 150));
+        throw new Error(`Server returned non-JSON response (${response.status}). You can use the local Fallback Parser to extract skills immediately.`);
+      }
+
+      if (!response.ok || !data) {
+        const technicalMsg = data?.message || data?.error || `AI Extraction failed with status ${response.status}`;
         throw new Error(technicalMsg);
       }
 
-      const data = await response.json();
       if (!data.success || !data.profile) {
         throw new Error('AI extraction returned invalid profile payload.');
       }
@@ -123,16 +131,26 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({
         body: formData
       });
 
-      if (!fallbackRes.ok) {
-        throw new Error(`Fallback parser failed with status ${fallbackRes.status}`);
+      const rawText = await fallbackRes.text();
+      let fallbackData: any = null;
+
+      try {
+        fallbackData = JSON.parse(rawText);
+      } catch {
+        throw new Error(`Fallback parser returned non-JSON response (${fallbackRes.status}).`);
       }
 
-      const fallbackData = await fallbackRes.json();
+      if (!fallbackRes.ok || !fallbackData) {
+        throw new Error(fallbackData?.message || `Fallback parser failed with status ${fallbackRes.status}`);
+      }
+
       if (fallbackData.profile) {
         setIsFallbackMode(true);
         setParsingStep('complete');
         onProfileExtracted(fallbackData.profile);
         onNavigate('/profile');
+      } else {
+        throw new Error('Fallback parser could not extract a valid profile.');
       }
     } catch (err: any) {
       setErrorMessage(`Fallback parser error: ${err.message}`);
