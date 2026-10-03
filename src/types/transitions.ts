@@ -1,8 +1,11 @@
+import { MLTransitionPrediction } from './ml.ts';
+
 export interface RoleDefinition {
   id: string;
   title: string;
   category: string;
   description: string;
+  typicalYearsExperience?: number;
   coreSkills: string[];
   secondarySkills: string[];
   emergingSkills: string[];
@@ -39,4 +42,5 @@ export interface TransitionRecommendation {
   rationale: string;
   estimatedTransitionWeeks: number;
   projectedResilienceDelta: number; // e.g. +14 points
+  mlReadiness?: MLTransitionPrediction;
 }

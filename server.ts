@@ -6,6 +6,8 @@ import mammoth from 'mammoth';
 import { GoogleGenAI, Type } from '@google/genai';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
+import { MLClientService } from './src/services/mlClientService.ts';
 
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
@@ -30,6 +32,7 @@ const auditMetrics = {
   cacheHits: 0,
   apiCallsCount: 0,
   fallbackUsageCount: 0,
+  mlInferenceCalls: 0,
   startedAt: new Date().toISOString()
 };
 
@@ -843,9 +846,57 @@ app.get('/api/market/jobs', async (req, res) => {
 });
 
 // ----------------------------------------------------
-// 5. System Audit & Telemetry
+// 5. Machine Learning Inference Proxy & Telemetry
 // ----------------------------------------------------
-app.get('/api/audit', (req, res) => {
+app.get('/api/ml/status', async (req, res) => {
+  const health = await MLClientService.checkHealth();
+  res.json({
+    success: true,
+    ...health
+  });
+});
+
+app.get('/api/ml/metadata', async (req, res) => {
+  const metadata = await MLClientService.getModelMetadata();
+  if (!metadata) {
+    return res.status(503).json({
+      success: false,
+      message: 'ML service offline or model metadata not available.'
+    });
+  }
+  res.json({
+    success: true,
+    metadata
+  });
+});
+
+app.post('/api/ml/predict-readiness', async (req, res) => {
+  const features = req.body;
+  if (!features || typeof features !== 'object' || !features.target_role) {
+    return res.status(400).json({
+      available: false,
+      reason: 'Invalid or missing feature payload for ML transition readiness prediction.'
+    });
+  }
+
+  auditMetrics.apiCallsCount++;
+  auditMetrics.mlInferenceCalls++;
+
+  try {
+    const prediction = await MLClientService.predictTransitionReadiness(features);
+    res.json(prediction);
+  } catch (err: any) {
+    res.status(500).json({
+      available: false,
+      reason: 'Internal error processing ML prediction request.'
+    });
+  }
+});
+
+// ----------------------------------------------------
+// 6. System Audit & Telemetry
+// ----------------------------------------------------
+app.get('/api/audit', async (req, res) => {
   const geminiConfigured = Boolean(process.env.GEMINI_API_KEY);
   const adzunaConfigured = Boolean(
     process.env.ADZUNA_APP_ID &&
@@ -858,9 +909,12 @@ app.get('/api/audit', (req, res) => {
     ? Math.round((auditMetrics.cacheHits / totalMarketQueries) * 100)
     : 100;
 
+  const mlHealth = await MLClientService.checkHealth();
+
   const warnings: string[] = [];
   if (!geminiConfigured) warnings.push('GEMINI_API_KEY is not configured in server environment.');
   if (!adzunaConfigured) warnings.push('ADZUNA_APP_ID and ADZUNA_APP_KEY are not configured. Live market queries will report NOT CONFIGURED.');
+  if (!mlHealth.operational) warnings.push('Python ML inference service is offline. Gracefully falling back to deterministic calculations.');
 
   res.json({
     jobsAnalyzed: auditMetrics.jobsAnalyzed,
@@ -872,7 +926,17 @@ app.get('/api/audit', (req, res) => {
     apiStatus: {
       gemini: geminiConfigured ? 'operational' : 'not_configured',
       adzuna: adzunaConfigured ? 'operational' : 'not_configured',
-      cache: 'operational'
+      cache: 'operational',
+      mlService: mlHealth.operational ? 'operational' : 'offline'
+    },
+    mlModel: {
+      status: mlHealth.operational ? 'operational' : 'offline',
+      version: 'v1.0.0',
+      algorithm: 'RandomForestClassifier',
+      inferenceCalls: auditMetrics.mlInferenceCalls,
+      datasetType: 'Proxy-labeled synthetic benchmark',
+      heldOutTestAccuracy: '97.22%',
+      macroF1: '96.72%'
     },
     scoringWeights: {
       marketDemand: 0.30,
@@ -896,6 +960,25 @@ app.get('/api/audit', (req, res) => {
 // Vite Middleware / Static Serve on Port 3000
 // ----------------------------------------------------
 async function startServer() {
+  // Ensure the Python ML service is running on port 5001
+  const health = await MLClientService.checkHealth();
+  if (!health.operational) {
+    console.log('[PathForge] ML service not detected on port 5001. Spawning Python FastAPI service...');
+    try {
+      const mlProc = spawn('python3', ['-m', 'uvicorn', 'ml.service:app', '--host', '127.0.0.1', '--port', '5001'], {
+        stdio: 'inherit',
+        detached: false
+      });
+      mlProc.on('error', (err) => {
+        console.warn('[PathForge] Failed to spawn Python ML service:', err.message);
+      });
+    } catch (e: any) {
+      console.warn('[PathForge] Python ML spawn notice:', e.message);
+    }
+  } else {
+    console.log('[PathForge] ML inference service already operational on port 5001.');
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({

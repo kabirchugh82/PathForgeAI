@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   GitFork,
   ArrowRight,
@@ -11,9 +11,15 @@ import {
   DollarSign,
   ChevronRight,
   Layers,
-  Compass
+  Compass,
+  Cpu,
+  ShieldCheck,
+  Calculator
 } from 'lucide-react';
 import { TransitionRecommendation } from '../types/transitions.ts';
+import { MLTransitionPrediction, MLTransitionFeatureInput } from '../types/ml.ts';
+import { MLReadinessCard } from '../components/MLReadinessCard.tsx';
+import { StorageService } from '../services/storageService.ts';
 
 interface CareerPathsPageProps {
   recommendations: TransitionRecommendation[];
@@ -31,6 +37,77 @@ export const CareerPathsPage: React.FC<CareerPathsPageProps> = ({
   const [selectedRecId, setSelectedRecId] = useState<string | null>(
     recommendations.length > 0 ? recommendations[0].id : null
   );
+
+  const [mlPrediction, setMlPrediction] = useState<MLTransitionPrediction | null>(null);
+  const [mlLoading, setMlLoading] = useState(false);
+
+  // Top 3 primary recommendations
+  const topPaths = recommendations.slice(0, 3);
+  const selectedRec = recommendations.find(r => r.id === selectedRecId) || topPaths[0];
+
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchMLReadiness() {
+      if (!selectedRec) return;
+
+      const profile = StorageService.getActiveProfile();
+      const analysis = StorageService.getActiveAnalysis();
+
+      const expYears = profile?.yearsOfExperience ?? 3.0;
+      const targetExpReq = selectedRec.targetRole.typicalYearsExperience ?? 3.0;
+      const expGap = expYears - targetExpReq;
+
+      const totalRequired = Math.max(1, selectedRec.existingSkillsCount + selectedRec.missingSkillsCount);
+      const skillMatchScore = selectedRec.skillOverlapPercentage / 100;
+      const skillGapScore = selectedRec.missingSkillsCount / totalRequired;
+
+      const marketDemandScore = analysis ? analysis.factors.marketDemand.score / 100 : 0.75;
+      const aiExposureScore = analysis ? analysis.factors.aiExposure.score / 100 : 0.35;
+      const transferabilityScore = selectedRec.transferabilityScore / 100;
+      const skillBreadthScore = analysis ? analysis.factors.skillBreadth.score / 100 : 0.65;
+      const emergingAlignmentScore = analysis ? analysis.factors.emergingAlignment.score / 100 : 0.20;
+      const transitionEffortScore = Math.min(1.0, selectedRec.gapEffortPenalty / 25);
+
+      const payload: MLTransitionFeatureInput = {
+        skill_match_score: skillMatchScore,
+        market_demand_score: marketDemandScore,
+        ai_exposure_score: aiExposureScore,
+        transferability_score: transferabilityScore,
+        skill_breadth_score: skillBreadthScore,
+        emerging_skill_alignment: emergingAlignmentScore,
+        skill_gap_score: skillGapScore,
+        experience_years: expYears,
+        target_role_experience_requirement: targetExpReq,
+        experience_gap: expGap,
+        number_of_matching_skills: selectedRec.alreadyHaveSkills.length,
+        number_of_missing_skills: selectedRec.needToDevelopSkills.length,
+        transition_effort_score: transitionEffortScore,
+        target_role: selectedRec.targetRole.title
+      };
+
+      setMlLoading(true);
+      try {
+        const res = await fetch('/api/ml/predict-readiness', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted) setMlPrediction(data);
+        } else {
+          if (isMounted) setMlPrediction({ available: false, reason: 'ML service error' });
+        }
+      } catch (err: any) {
+        if (isMounted) setMlPrediction({ available: false, reason: 'ML service offline' });
+      } finally {
+        if (isMounted) setMlLoading(false);
+      }
+    }
+
+    fetchMLReadiness();
+    return () => { isMounted = false; };
+  }, [selectedRec?.id]);
 
   if (!recommendations || recommendations.length === 0) {
     return (
@@ -51,10 +128,6 @@ export const CareerPathsPage: React.FC<CareerPathsPageProps> = ({
       </div>
     );
   }
-
-  // Top 3 primary recommendations
-  const topPaths = recommendations.slice(0, 3);
-  const selectedRec = recommendations.find(r => r.id === selectedRecId) || topPaths[0];
 
   return (
     <div className="space-y-8 py-6">
@@ -174,6 +247,81 @@ export const CareerPathsPage: React.FC<CareerPathsPageProps> = ({
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
+        </div>
+
+        {/* Dual Intelligence Comparison: Deterministic Rule-Based vs Trained ML Prediction */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Card 1: Deterministic PathForge Score */}
+          <div className="p-5 rounded-2xl bg-gradient-to-b from-slate-900/90 to-slate-950 border border-slate-800 shadow-xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-blue-950/80 border border-blue-800 flex items-center justify-center text-blue-400">
+                  <Calculator className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                    Deterministic Fit Score
+                  </h4>
+                  <span className="text-[10px] font-mono text-slate-500">
+                    Engine: PathForge Rule-Based Formula v1.4
+                  </span>
+                </div>
+              </div>
+
+              <span className="text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded-full border bg-blue-950/80 text-blue-400 border-blue-800/80">
+                Rule-Based Fit
+              </span>
+            </div>
+
+            <div className="flex items-end justify-between p-3.5 rounded-xl bg-slate-950/80 border border-slate-800">
+              <div>
+                <span className="text-[10px] font-mono uppercase text-slate-400 block mb-0.5">
+                  Calculated Fit Index
+                </span>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-3xl font-black font-mono tracking-tight text-blue-400">
+                    {selectedRec.fitScore}
+                  </span>
+                  <span className="text-xs font-mono text-slate-500">
+                    / 100
+                  </span>
+                </div>
+              </div>
+
+              <div className="text-right text-[10px] font-mono text-slate-500">
+                <span className="text-emerald-400 font-bold">+{selectedRec.projectedResilienceDelta} pts</span> uplift
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-800/80">
+              <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800">
+                <span className="text-[10px] text-slate-400 block">Skill Overlap</span>
+                <span className="font-mono font-bold text-slate-200">{selectedRec.skillOverlapPercentage}%</span>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800">
+                <span className="text-[10px] text-slate-400 block">Transferability</span>
+                <span className="font-mono font-bold text-slate-200">{selectedRec.transferabilityScore}/100</span>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800">
+                <span className="text-[10px] text-slate-400 block">Market Alignment</span>
+                <span className="font-mono font-bold text-slate-200">{selectedRec.marketAlignmentScore}/100</span>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800">
+                <span className="text-[10px] text-slate-400 block">Gap Effort Penalty</span>
+                <span className="font-mono font-bold text-amber-400">-{selectedRec.gapEffortPenalty} pts</span>
+              </div>
+            </div>
+
+            <div className="p-2.5 rounded-lg bg-slate-950/90 border border-slate-800 text-[10px] text-slate-400 leading-relaxed flex items-start gap-2">
+              <ShieldCheck className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
+              <span>
+                Calculated strictly without AI guessing: evaluates explicit skill overlap, market frequency weights, and training effort penalty.
+              </span>
+            </div>
+          </div>
+
+          {/* Card 2: Real Machine Learning Prediction Layer */}
+          <MLReadinessCard prediction={mlPrediction} loading={mlLoading} />
         </div>
 
         {/* Skill Gap Comparison: Already Have vs Need to Develop */}
